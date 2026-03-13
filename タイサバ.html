@@ -1,0 +1,1287 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>タイピング・サバイバー：アルティメット・エターナル</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=DotGothic16&display=swap');
+        body { background-color: #050505; color: #00ff41; font-family: 'DotGothic16', sans-serif; overflow: hidden; touch-action: manipulation; }
+        .scanner-line { position: absolute; width: 100%; height: 2px; background: rgba(0, 255, 65, 0.2); box-shadow: 0 0 10px #00ff41; animation: scan 4s linear infinite; pointer-events: none; z-index: 100; }
+        @keyframes scan { 0% { top: 0; } 100% { top: 100%; } }
+        
+        .enemy { position: absolute; transition: transform 0.1s linear; z-index: 10; }
+        .word-label { font-size: 22px; border-radius: 6px; box-shadow: 0 0 20px rgba(0, 255, 65, 0.8); }
+        .kana-hint { font-size: 12px; color: #ccc; margin-bottom: 2px; }
+        .typed { color: #555; display: none; } 
+        .current { color: #ff00ff; text-decoration: underline; font-weight: bold; font-size: 1.3em; text-shadow: 0 0 10px #ff00ff; }
+        .remaining { color: #fff; opacity: 1; text-shadow: 0 0 5px #fff; }
+        
+        .health-bar { height: 12px; background: #222; width: 150px; border: 1px solid #00ff41; border-radius: 6px; overflow: hidden; }
+        .health-fill { height: 100%; background: #00ff41; transition: width 0.3s; }
+        .exp-bar { height: 8px; background: #111; border: 1px solid #ff00ff; border-radius: 4px; overflow: hidden; }
+        .exp-fill { height: 100%; background: #ff00ff; transition: width 0.5s ease-out; }
+        .mode-active { background-color: #00ff41 !important; color: black !important; border-color: #ffffff !important; }
+        
+        .speech-bubble { position: fixed; background: #ffffff; color: #333333; padding: 12px 20px; border-radius: 12px; font-weight: bold; font-size: 1rem; pointer-events: none; transform: translate(-50%, -100%); filter: drop-shadow(0 0 10px rgba(0, 0, 0, 0.5)); transition: opacity 0.3s; z-index: 999; border: 2px solid #ddd; max-width: 250px; text-align: left; }
+        .speech-bubble::after { content: ''; position: absolute; top: 100%; left: 50%; transform: translateX(-50%); border-width: 8px; border-style: solid; border-color: #ffffff transparent transparent transparent; }
+        
+        .modal-overlay { background: rgba(0,0,0,0.93); backdrop-filter: blur(8px); }
+        .ui-foreground { pointer-events: auto !important; position: relative; z-index: 1000; }
+        
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #111; }
+        ::-webkit-scrollbar-thumb { background: #00ff41; border-radius: 4px; }
+    </style>
+</head>
+<body class="flex items-center justify-center min-h-screen relative outline-none" id="game-body" tabindex="0">
+
+    <div class="scanner-line"></div>
+
+    <!-- メインメニュー -->
+    <div id="menu-screen" class="z-[200] bg-black/95 p-6 border-4 border-green-500 rounded-2xl text-center max-w-2xl w-full shadow-[0_0_50px_rgba(0,255,65,0.2)] max-h-[95vh] overflow-y-auto">
+        <h1 class="text-4xl md:text-6xl font-black mb-2 italic tracking-tighter text-green-400 text-shadow-lg">TYPING SURVIVOR</h1>
+        <p class="text-xs text-green-500 mb-4 tracking-widest text-shadow-sm">樟南高校ワープロ部：完全版Ver.X</p>
+        
+        <!-- ステータスパネル -->
+        <div class="bg-zinc-900/90 border-2 border-fuchsia-500 rounded-xl p-4 mb-4 flex flex-col shadow-lg text-left text-xs">
+            <div class="flex items-center gap-4 mb-2">
+                <div id="menu-avatar" class="w-16 h-16 bg-black border border-fuchsia-500 rounded-lg flex items-center justify-center overflow-hidden">
+                    <svg id="avatar-svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="w-10 h-10 text-fuchsia-500"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                </div>
+                <div class="flex-1">
+                    <div class="flex justify-between items-center mb-1 border-b border-zinc-700 pb-1">
+                        <span class="text-[10px] text-zinc-400 font-bold tracking-tighter">部員: <span id="current-player-name" class="text-white">名無しの部員</span></span>
+                        <button onclick="window.switchPlayer()" class="ui-foreground text-[9px] bg-blue-900 border border-blue-500 px-2 py-0.5 rounded hover:bg-blue-700 active:scale-95">交代</button>
+                    </div>
+                    <p class="text-fuchsia-400 font-bold text-lg leading-tight mt-1">段位: <span id="global-level-display">1</span> <span id="skin-name-display" class="text-[9px] text-zinc-400 ml-2">衣装: 標準</span></p>
+                    <div class="exp-bar my-1"><div id="global-exp-fill" class="exp-fill w-0"></div></div>
+                    <div class="flex justify-between font-bold">
+                        <span>NEXT: <span id="exp-text">0 / 1000</span></span>
+                        <span class="text-yellow-400 font-bold">💰 <span id="coin-display">0</span> C</span>
+                    </div>
+                </div>
+                <div class="flex flex-col gap-1">
+                    <button onclick="window.openCharaMake()" class="ui-foreground bg-blue-800 text-white text-[10px] px-2 py-1 rounded active:scale-95">✂️ 設定</button>
+                    <button onclick="window.openShop()" class="ui-foreground bg-yellow-700 text-black font-bold text-[10px] px-2 py-1 rounded active:scale-95">🛒 購買部</button>
+                    <button onclick="window.showRanking()" class="ui-foreground bg-green-700 text-white text-[10px] px-2 py-1 rounded active:scale-95">🏆 順位</button>
+                </div>
+            </div>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+                <button onclick="window.open3DRoom('fureai')" class="ui-foreground bg-pink-700 text-white font-bold py-2 rounded-lg text-sm active:scale-95 transition-transform shadow-lg">💕 交流部屋 (個室)</button>
+                <button onclick="window.open3DRoom('openworld')" class="ui-foreground bg-indigo-600 text-white font-bold py-2 rounded-lg text-sm active:scale-95 transition-transform shadow-lg">🌍 オンライン島</button>
+            </div>
+        </div>
+
+        <div class="space-y-3">
+            <!-- AIワード召喚 -->
+            <div class="bg-zinc-900/80 p-2 rounded-lg border border-cyan-500 text-left">
+                <h3 class="text-cyan-400 font-bold mb-1 text-[10px]">✨ AIテーマ召喚 (Gemini)</h3>
+                <div class="flex gap-2">
+                    <input type="text" id="theme-input" placeholder="例: 鹿児島, IT用語, 猫" class="flex-1 bg-black border border-cyan-900 p-1 text-white text-xs rounded outline-none focus:border-cyan-400">
+                    <button onclick="window.generateAIWords()" class="ui-foreground bg-cyan-700 text-white px-2 py-1 rounded text-[10px] font-bold active:scale-95">召喚</button>
+                </div>
+                <p id="gen-status" class="text-[9px] mt-1 text-yellow-500 h-2 font-bold"></p>
+            </div>
+
+            <!-- 設定ボタン -->
+            <div class="grid grid-cols-2 gap-2 text-left">
+                <div class="bg-zinc-900/80 p-2 rounded-lg border border-green-500">
+                    <p class="text-[10px] text-green-400 font-bold mb-1">⌨️ 入力 (PCはATOK貫通)</p>
+                    <div class="grid grid-cols-3 gap-1">
+                        <button id="btn-romaji" class="ui-foreground mode-active bg-zinc-900 p-1 rounded text-[9px] border border-green-500" onclick="window.setTypingMode('romaji')">ﾛｰﾏ字</button>
+                        <button id="btn-kana" class="ui-foreground bg-zinc-900 p-1 rounded text-[9px] border border-green-500 opacity-50" onclick="window.setTypingMode('kana')">かな</button>
+                        <button id="btn-flick" class="ui-foreground bg-zinc-900 p-1 rounded text-[9px] border border-blue-500 opacity-50" onclick="window.setTypingMode('flick')">📱ﾌﾘｯｸ</button>
+                    </div>
+                </div>
+                <div class="bg-zinc-900/80 p-2 rounded-lg border border-yellow-500">
+                    <p class="text-[10px] text-yellow-400 font-bold mb-1">⏱️ 制限時間</p>
+                    <div class="grid grid-cols-3 gap-1">
+                        <button id="time-10" onclick="window.setTimeLimit(10)" class="ui-foreground time-btn bg-zinc-900 p-1 rounded text-[10px] border border-yellow-500 opacity-50">10s</button>
+                        <button id="time-30" onclick="window.setTimeLimit(30)" class="ui-foreground time-btn bg-zinc-900 p-1 rounded text-[10px] border border-yellow-500 opacity-50">30s</button>
+                        <button id="time-60" onclick="window.setTimeLimit(60)" class="ui-foreground time-btn mode-active bg-zinc-900 p-1 rounded text-[10px] border border-yellow-500">60s</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-zinc-900/80 p-3 rounded-lg border border-red-500 text-left text-xs">
+                <div class="grid grid-cols-2 gap-4">
+                    <div>
+                        <p class="text-orange-400 font-bold text-[10px] mb-1">⚙️ 難易度</p>
+                        <div class="grid grid-cols-2 gap-1">
+                            <button id="diff-slow" class="ui-foreground diff-btn bg-zinc-900 p-1 rounded border border-green-500 opacity-50 text-[9px]" onclick="window.setDifficulty('slow')">低速</button>
+                            <button id="diff-fast" class="ui-foreground diff-btn bg-zinc-900 p-1 rounded border border-yellow-500 opacity-50 text-[9px]" onclick="window.setDifficulty('fast')">高速</button>
+                            <button id="diff-super" class="ui-foreground diff-btn mode-active bg-zinc-900 p-1 rounded border border-orange-500 text-[9px]" onclick="window.setDifficulty('super')">超速</button>
+                            <button id="diff-brutal" class="ui-foreground diff-btn bg-zinc-900 p-1 rounded border border-red-600 opacity-50 text-[9px] text-red-500 font-bold" onclick="window.setDifficulty('brutal')">鬼畜</button>
+                        </div>
+                    </div>
+                    <div>
+                        <p class="text-red-500 font-bold text-[10px] mb-1">🔥 合言葉対戦</p>
+                        <div class="flex flex-col gap-1">
+                            <input type="text" id="room-code" class="w-full bg-black border border-red-500 p-1 text-white text-center rounded font-bold text-[9px]" placeholder="kusa123">
+                            <div class="flex gap-1">
+                                <button onclick="window.hostP2P()" class="ui-foreground flex-1 bg-red-700 text-white py-1 rounded font-bold text-[9px] active:scale-95 shadow-md">ﾎｽﾄ</button>
+                                <button onclick="window.joinP2P()" class="ui-foreground flex-1 bg-pink-700 text-white py-1 rounded font-bold text-[9px] active:scale-95 shadow-md">参戦</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div id="p2p-status" class="mt-2 text-[9px] text-yellow-500 text-center hidden font-bold">通信待機中...</div>
+            </div>
+
+            <button onclick="window.startMode('SOLO')" class="ui-foreground w-full bg-green-600 hover:bg-green-500 text-black font-black py-4 rounded-xl shadow-xl active:scale-95 text-xl tracking-widest transition-colors">👤 特訓開始</button>
+        </div>
+    </div>
+
+    <!-- UIモーダル群 -->
+    <div id="shop-modal" class="hidden fixed inset-0 z-[600] modal-overlay flex items-center justify-center text-white text-left text-xs">
+        <div class="bg-zinc-900 border-4 border-yellow-500 p-6 rounded-xl w-11/12 max-w-4xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <div class="flex justify-between items-center border-b border-yellow-500 pb-2 mb-4"><h2 class="text-2xl font-bold text-yellow-400">🛒 購買部</h2><p>💰 <span id="shop-coin-display" class="text-yellow-400 font-bold">0</span> C</p></div>
+            <div id="shop-list-container" class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div><h3 class="text-orange-400 font-bold mb-2 border-b border-orange-500/50">補給品 (おやつ)</h3><div id="food-shop-list" class="flex flex-col gap-1"></div></div>
+                <div><h3 class="text-fuchsia-400 font-bold mb-2 border-b border-fuchsia-500/50">衣類 (スキン)</h3><div id="clothes-shop-list" class="flex flex-col gap-1"></div></div>
+                <div><h3 class="text-green-400 font-bold mb-2 border-b border-green-500/50">備品 (家具)</h3><div id="furniture-shop-list" class="flex flex-col gap-1"></div></div>
+            </div>
+            <button onclick="window.toggleModal('shop-modal', false)" class="ui-foreground mt-6 w-full bg-zinc-700 py-3 rounded font-bold active:scale-95">店を出る</button>
+        </div>
+    </div>
+
+    <div id="charamake-modal" class="hidden fixed inset-0 z-[500] modal-overlay flex items-center justify-center text-white text-left">
+        <div class="bg-zinc-900 border-4 border-blue-500 p-6 rounded-xl w-11/12 max-w-2xl shadow-2xl max-h-[90vh] overflow-y-auto">
+            <h2 class="text-2xl font-bold mb-4 border-b border-blue-500 pb-2">✂️ キャラ・AI設定</h2>
+            <div class="flex flex-col sm:flex-row gap-6">
+                <div class="flex-1 space-y-3 text-sm">
+                    <div class="flex items-center justify-between"><label>肌の色:</label><input type="color" id="make-skin-color" oninput="window.updatePreviewModel()" class="w-16 h-8 bg-black border border-zinc-500 rounded cursor-pointer"></div>
+                    <div class="flex items-center justify-between"><label>髪型:</label>
+                        <select id="make-hair-type" onchange="window.updatePreviewModel()" class="w-1/2 bg-black border border-zinc-500 p-1 rounded text-xs text-white">
+                            <option value="mash">マッシュ</option><option value="shortbob">ショートボブ</option><option value="long">ロング</option><option value="twintail">ツインテール</option><option value="ponytail">ポニーテール</option><option value="hime">お姫様カット</option><option value="drills">ドリル</option><option value="side_tail">サイドテール</option><option value="messy">くせ毛</option><option value="short">短髪</option><option value="bun">お団子</option><option value="wave">ウェーブ</option><option value="spike">スパイク</option><option value="curls">カール</option><option value="shaggy">シャギー</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center justify-between"><label>髪色:</label><input type="color" id="make-hair-color" oninput="window.updatePreviewModel()" class="w-16 h-8 bg-black border border-zinc-500 rounded cursor-pointer"></div>
+                    <div class="flex items-center justify-between"><label>衣装:</label><select id="make-clothes-type" onchange="window.updatePreviewModel()" class="w-1/2 bg-black border border-zinc-500 p-1 rounded text-xs text-white"></select></div>
+                    <div class="flex items-center justify-between mb-2"><label>顔立ち:</label>
+                        <select id="make-face-type" onchange="window.updatePreviewModel()" class="w-1/2 bg-black border border-zinc-500 p-1 rounded text-xs text-white">
+                            <option value="normal">清楚</option><option value="smile">微笑み</option><option value="cool">キリッ</option><option value="heart">キラキラ</option><option value="sleepy">おねむ</option>
+                        </select>
+                    </div>
+                    <div class="border-t border-zinc-700 pt-3 mt-3"></div>
+                    <div class="flex items-center justify-between"><label class="text-cyan-300 font-bold">部員名:</label><input type="text" id="make-master-name" placeholder="マスター" class="w-1/2 bg-black border border-cyan-500 p-1 rounded text-xs text-white"></div>
+                    <div class="flex items-center justify-between"><label class="text-cyan-300 font-bold">AI名:</label><input type="text" id="make-ai-name" placeholder="相棒" class="w-1/2 bg-black border border-cyan-500 p-1 rounded text-xs text-white"></div>
+                    <div class="flex items-center justify-between"><label class="text-cyan-300 font-bold">AI性格:</label>
+                        <select id="make-ai-gender" class="w-1/2 bg-black border border-cyan-500 p-1 rounded text-[10px] text-white">
+                            <option value="male">頼れるアニキ</option><option value="female">清楚な後輩女子</option><option value="ikemen">クールなイケメン</option><option value="prince">気高い王子様</option><option value="tsundere">ツンデレ幼馴染</option><option value="chuunibyou">中二病の魔王</option><option value="neutral">丁寧なAIロボ</option><option value="friend">お調子者の親友</option>
+                        </select>
+                    </div>
+                    <div class="flex items-center justify-between"><label class="text-cyan-300 font-bold">解答長さ:</label>
+                        <select id="make-ai-length" class="w-1/2 bg-black border border-cyan-500 p-1 rounded text-xs text-white">
+                            <option value="veryshort">超短文</option><option value="short" selected>短め</option><option value="long">長め</option>
+                        </select>
+                    </div>
+                </div>
+                <div class="w-full sm:w-56 h-56 bg-[#87CEEB] border border-blue-500 rounded-lg overflow-hidden flex items-center justify-center relative" id="preview-canvas-container"></div>
+            </div>
+            <button onclick="window.closeCharaMake()" class="ui-foreground mt-6 w-full bg-blue-600 py-3 rounded font-bold active:scale-95 shadow-lg">設定完了</button>
+        </div>
+    </div>
+
+    <!-- 3D ROOM (個室 / オンライン島) -->
+    <div id="room-3d-screen" class="hidden fixed inset-0 z-[400]">
+        <div id="canvas-container" class="w-full h-full cursor-pointer"></div>
+        
+        <!-- 島UI：操作 -->
+        <div class="absolute top-6 left-6 z-[500] flex gap-2 pointer-events-auto">
+            <button onclick="window.close3DRoom()" class="ui-foreground bg-indigo-900 border-2 border-indigo-400 text-white px-6 py-2 rounded-full font-bold shadow-lg active:scale-95">🏠 戻る (ESC)</button>
+            <button id="housing-toggle-btn" onclick="window.toggleHousingMode()" class="ui-foreground bg-yellow-700 border-2 border-yellow-400 text-white px-4 py-2 rounded-full font-bold shadow-lg active:scale-95">🔨 模様替え</button>
+        </div>
+        
+        <div id="island-guide" class="absolute top-20 left-6 z-[500] bg-black/70 p-3 rounded-lg border border-white/20 text-white text-xs pointer-events-none hidden">
+            <p class="font-bold text-yellow-300 mb-1">🎮 島での操作</p>
+            <p>移動: [W][A][S][D]</p>
+            <p>施設: 近づいてクリック</p>
+            <p>AI: クリックでお世話</p>
+        </div>
+
+        <div id="housing-ui" class="hidden absolute bottom-24 left-6 bg-black/80 border-2 border-yellow-500 p-3 rounded-xl shadow-lg pointer-events-auto text-left w-64 text-xs text-white z-[600]">
+            <p class="text-yellow-400 font-bold mb-2">家具を配置:</p>
+            <div class="flex gap-1 mb-2">
+                <select id="furniture-select" class="flex-1 bg-zinc-900 border border-yellow-600 text-white p-1 rounded outline-none"></select>
+                <button onclick="window.placeFurniture()" class="ui-foreground bg-yellow-600 px-2 rounded font-bold active:scale-95 text-black">置く</button>
+            </div>
+            <p class="text-zinc-500 text-[9px]">地面をクリックして移動</p>
+        </div>
+
+        <!-- アクションメニュー -->
+        <div id="action-menu" class="absolute bottom-6 right-6 bg-black/80 border-2 border-indigo-500 p-4 rounded-xl shadow-lg flex flex-col gap-2 w-80 text-left pointer-events-auto text-xs z-[600]">
+            <div class="flex justify-between items-center mb-1">
+                <p class="text-pink-400 font-bold">🤝 信頼度: <span id="affection-display">0</span></p>
+            </div>
+            <div class="flex gap-1 mb-2">
+                <input type="text" id="chat-input" class="flex-1 bg-zinc-900 border border-indigo-500 text-white p-2 rounded outline-none focus:ring-2 focus:ring-indigo-400" placeholder="メッセージ（Enter送信）">
+                <button onclick="window.chatWithAI()" class="ui-foreground bg-indigo-600 text-white px-3 rounded font-bold active:scale-95">送信</button>
+            </div>
+            <div class="grid grid-cols-2 gap-2">
+                <div class="flex gap-1 border border-orange-900 p-1 rounded">
+                    <select id="inventory-select" class="flex-1 bg-zinc-900 border border-orange-500 text-orange-200 text-[10px] p-1 rounded outline-none"></select>
+                    <button onclick="window.feedAI()" class="ui-foreground bg-orange-600 text-white font-bold px-2 rounded text-[10px] active:scale-95">🍖 渡す</button>
+                </div>
+                <div class="flex gap-1 border border-fuchsia-900 p-1 rounded">
+                    <select id="clothes-select" class="flex-1 bg-zinc-900 border border-fuchsia-500 text-fuchsia-200 text-[10px] p-1 rounded outline-none"></select>
+                    <button onclick="window.giveClothesToAI()" class="ui-foreground bg-fuchsia-600 text-white font-bold px-2 rounded text-[10px] active:scale-95">👗 着せる</button>
+                </div>
+            </div>
+        </div>
+        
+        <div id="speech-bubble" class="speech-bubble opacity-0"></div>
+        <div class="absolute bottom-10 left-1/2 transform -translate-x-1/2 text-center z-10 text-white font-bold text-2xl drop-shadow-lg" id="3d-skin-name-display"></div>
+    </div>
+
+    <!-- HUD (タイピング本編) -->
+    <div id="game-hud" class="hidden fixed top-0 left-0 w-full p-4 flex justify-between items-start z-50 pointer-events-none text-white text-left text-shadow-md">
+        <div class="bg-black/80 p-3 border border-red-500 rounded-lg shadow-lg pointer-events-auto">
+            <button onclick="window.quitGame()" class="ui-foreground text-[10px] text-red-500 font-bold mb-2 bg-black border border-red-900 px-2 rounded active:scale-95 shadow-md">🏠 離脱 (ESC)</button>
+            <div class="flex justify-between items-end border-b border-red-500/50 pb-1 mb-1"><p class="text-3xl font-black" id="time-display">60.0</p><p class="text-sm text-blue-400 font-bold">WPM: <span id="wpm-display">0</span></p></div>
+            <div class="health-bar mb-2 border-red-500"><div id="hp-fill" class="health-fill w-full"></div></div>
+            <p class="text-xl font-bold">SCORE: <span id="score-display">0</span></p>
+            <p class="text-xs text-pink-500 mt-1">LEVEL: <span id="level-display">1</span></p>
+        </div>
+        <div id="rival-hud" class="hidden bg-black/80 p-3 border border-orange-500 rounded-lg text-right shadow-lg">
+            <p class="text-xs text-orange-400 font-bold">RIVAL: <span id="rival-name-display" class="text-white">...</span></p>
+            <div class="health-bar border-orange-500 mb-2 ml-auto"><div id="rival-hp-fill" class="health-fill bg-orange-500 w-full"></div></div>
+            <p class="text-xl text-orange-400 font-bold" id="rival-score-display">0</p>
+        </div>
+    </div>
+
+    <div id="game-container" class="fixed inset-0 hidden pointer-events-none text-center">
+        <!-- 自機コア -->
+        <div id="player-core" class="absolute left-1/2 top-1/2 transform -translate-x-1/2 -translate-y-1/2 w-16 h-16 z-40">
+            <svg viewBox="0 0 24 24" fill="none" stroke="#00ff41" stroke-width="2" class="w-full h-full drop-shadow-[0_0_10px_#00ff41]">
+                <path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5" />
+            </svg>
+        </div>
+    </div>
+
+    <!-- スマホ用フリック入力ボックス -->
+    <input type="text" id="flick-input-box" class="hidden fixed bottom-10 left-1/2 transform -translate-x-1/2 bg-black/90 border-2 border-green-500 text-white p-4 text-2xl w-11/12 max-w-lg z-[1000] text-center rounded-lg shadow-2xl" placeholder="ここをタップして入力！" autocomplete="off" spellcheck="false">
+
+    <!-- RESULT / RANKING -->
+    <div id="game-over" class="hidden z-[300] bg-black/95 p-10 border-4 border-red-500 rounded-2xl text-center max-w-lg shadow-2xl text-white">
+        <h2 id="result-title" class="text-5xl font-black text-red-500 mb-2 italic">FINISH</h2>
+        <div class="bg-zinc-900 border border-fuchsia-500 p-4 rounded-xl mb-4 text-left shadow-lg text-xs">
+            <p class="text-2xl font-bold mb-1" id="final-exp-disp">+ 0 EXP</p>
+            <p class="text-xl font-bold text-yellow-400" id="final-coin-disp">💰 + 0 C</p>
+        </div>
+        <div class="bg-black border border-pink-500 p-3 rounded-lg mb-6 min-h-[60px] flex items-center justify-center text-center"><p id="ai-roast" class="text-sm font-bold text-pink-400 italic">AIの評価を受信中...</p></div>
+        <button onclick="window.returnToMenu()" class="ui-foreground bg-white text-black px-12 py-3 font-black rounded-full shadow-lg active:scale-95">メニューへ戻る</button>
+    </div>
+
+    <div id="ranking-modal" class="hidden fixed inset-0 z-[600] modal-overlay flex items-center justify-center text-white">
+        <div class="bg-zinc-900 border-4 border-green-500 p-6 rounded-xl w-11/12 max-w-md shadow-2xl">
+            <h2 class="text-2xl font-bold mb-4 border-b border-green-500 pb-2 text-green-400 text-center">🏆 世界ランキング</h2>
+            <div id="ranking-list" class="h-80 overflow-y-auto mb-4 text-sm"></div>
+            <button onclick="window.toggleModal('ranking-modal', false)" class="ui-foreground w-full bg-green-700 py-3 rounded font-bold active:scale-95">閉じる</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, setDoc, getDoc, getDocs, collection, onSnapshot, updateDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // ==========================================
+        // ★ 1. グローバル変数の宣言とサウンド設定
+        // ==========================================
+        const apiKey = ""; 
+        let app, auth, db, user, isFirebaseActive = false;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'shonan-typing-pro-max-final';
+
+        // ★ 初期プレイヤー名を「名無しの部員」に変更（本名バレ対策）
+        let playerName = "名無しの部員", aiName = "相棒", aiGender = "male", aiReplyLength = "short";
+        let globalExp = 0, globalLevel = 1, coins = 0, affection = 0;
+        let inventory = { kusa: 0, kurobuta: 0 }, unlockedClothes = ['default'];
+        let appearance = { skinColor: '#ffccaa', hairType: 'mash', hairColor: '#333333', faceType: 'normal', clothes: 'default' };
+        let aiAppearance = { skinColor: '#ffccaa', hairType: 'shortbob', hairColor: '#883333', faceType: 'smile', clothes: 'default' };
+        let furnitureInventory = { desk: 0, chair: 0, bed: 0, pc: 0 };
+        let roomData = { wallColor: '#111111', floorColor: '#333333', furnitures: [] };
+        
+        let currentDifficulty = 'super', typingMode = 'romaji', targetTime = 60, currentMode = 'SOLO';
+        let score = 0, hp = 100, totalTyped = 0, enemies = [], activeEnemy = null, typedIndex = 0, lastSpawn = 0, gameState = 'MENU';
+        let currentLevel = 1; 
+        let is3DActive = false, isHousingMode = false, dataConnection = null;
+        let scene, camera, renderer, myAvatarObj, myAiObj, furnituresGroup, animationId, previewScene, previewCamera, previewRenderer, previewGroup;
+
+        let baseRomajiList = [];
+        let baseKanaList = [];
+
+        // トモコレ移動用
+        const keys = { w:false, a:false, s:false, d:false };
+        let otherPlayers = {}; 
+        let onlineIslandUnsubscribe = null;
+        let currentRoomId = null;
+        let isHost = false;
+
+        // --- Sound & BGM ---
+        let audioCtx = null;
+        let bgmOsc = null;
+        let bgmInterval = null;
+
+        window.initAudio = () => {
+            if (!audioCtx) {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+            }
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+        };
+
+        window.playSound = (freq, type = 'square', duration = 0.1, vol = 0.05) => {
+            if (!audioCtx) return;
+            try {
+                const osc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                osc.type = type;
+                osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+                gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+                gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+                osc.connect(gain);
+                gain.connect(audioCtx.destination);
+                osc.start();
+                osc.stop(audioCtx.currentTime + duration);
+            } catch(e) {}
+        };
+
+        window.startBGM = () => {
+            window.initAudio();
+            if (bgmOsc) return;
+            try {
+                bgmOsc = audioCtx.createOscillator();
+                const gain = audioCtx.createGain();
+                bgmOsc.type = 'triangle';
+                gain.gain.value = 0.05;
+                bgmOsc.connect(gain).connect(audioCtx.destination);
+                bgmOsc.frequency.value = 220;
+                bgmOsc.start();
+                
+                const notes = [220, 220, 261.63, 293.66, 329.63, 293.66, 261.63, 220];
+                let idx = 0;
+                bgmInterval = setInterval(() => {
+                    if(bgmOsc && audioCtx) {
+                        bgmOsc.frequency.setValueAtTime(notes[idx % notes.length], audioCtx.currentTime);
+                        idx++;
+                    }
+                }, 250);
+            } catch(e) {}
+        };
+
+        window.stopBGM = () => {
+            if (bgmOsc) { 
+                try { bgmOsc.stop(); bgmOsc.disconnect(); } catch(e){} 
+                bgmOsc = null; 
+            }
+            if (bgmInterval) { clearInterval(bgmInterval); bgmInterval = null; }
+        };
+
+        // --- Data ---
+        const WORD_MAP = { "kusa":"くさ", "sorena":"それな", "yabai":"やばい", "kami":"かみ", "numa":"ぬま", "isoge":"いそげ", "shonan":"しょうなん", "wapuro":"わーぷろ" };
+        baseRomajiList = Object.keys(WORD_MAP);
+        baseKanaList = Object.values(WORD_MAP);
+        let currentWordList = [...baseRomajiList];
+        let currentKanaList = [...baseKanaList];
+        
+        const DIFF_SETTINGS = { 'slow': {baseSpeed:0.3,spawnBase:2500,dmg:5}, 'fast': {baseSpeed:0.6,spawnBase:2000,dmg:10}, 'super': {baseSpeed:1.2,spawnBase:1500,dmg:15}, 'brutal': {baseSpeed:2.5,spawnBase:800,dmg:35} };
+        const CLOTHES_DB = {'default':{name:'標準ジャージ',price:0,color:'#dddddd'},'casual':{name:'私服',price:200,color:'#ff8800'},'school_girl':{name:'制服',price:800,color:'#002244'},'suit':{name:'スーツ',price:1500,color:'#1a1a1a'},'ninja':{name:'忍者装束',price:2500,color:'#0a0a0a'},'maid':{name:'奉公着',price:3500,color:'#333333'},'dress':{name:'礼装',price:5000,color:'#ff88bb'},'god':{name:'神の衣',price:10000,color:'#ffd700'}};
+        const FOOD_DB = {'kusa':{name:'謎の草',price:50,aff:1,msg:'草。'},'kurobuta':{name:'黒豚',price:2500,aff:35,msg:'旨。'}};
+        const FURNITURE_DB = {'desk':{name:'机',price:800,color:'#8B4513'},'chair':{name:'椅子',price:400,color:'#555555'},'bed':{name:'寝具',price:2500,color:'#ffffff'},'pc':{name:'計算機',price:5000,color:'#111111'}};
+        
+        // ★ JISカナ ＆ 濁音処理 ＆ PC最強貫通配列
+        const ROMAJI_MAP = {
+            'KeyA':'a', 'KeyB':'b', 'KeyC':'c', 'KeyD':'d', 'KeyE':'e', 'KeyF':'f', 'KeyG':'g', 'KeyH':'h', 'KeyI':'i', 'KeyJ':'j', 'KeyK':'k', 'KeyL':'l', 'KeyM':'m', 'KeyN':'n', 'KeyO':'o', 'KeyP':'p', 'KeyQ':'q', 'KeyR':'r', 'KeyS':'s', 'KeyT':'t', 'KeyU':'u', 'KeyV':'v', 'KeyW':'w', 'KeyX':'x', 'KeyY':'y', 'KeyZ':'z',
+            'Minus':'-', 'Digit0':'0', 'Digit1':'1', 'Digit2':'2', 'Digit3':'3', 'Digit4':'4', 'Digit5':'5', 'Digit6':'6', 'Digit7':'7', 'Digit8':'8', 'Digit9':'9'
+        };
+        const JIS_KANA_MAP = {'Digit1':'ぬ','Digit2':'ふ','Digit3':'あ','Digit4':'う','Digit5':'え','Digit6':'お','Digit7':'や','Digit8':'ゆ','Digit9':'よ','Digit0':'わ','Minus':'ほ','Equal':'へ','IntlYen':'ー','KeyQ':'た','KeyW':'て','KeyE':'い','KeyR':'す','KeyT':'か','KeyY':'ん','KeyU':'な','KeyI':'に','KeyO':'ら','KeyP':'せ','BracketLeft':'゛','BracketRight':'゜','KeyA':'ち','KeyS':'と','KeyD':'し','KeyF':'は','KeyG':'き','KeyH':'く','KeyJ':'ま','KeyK':'の','KeyL':'り','Semicolon':'れ','Quote':'け','Backslash':'む','KeyZ':'つ','KeyX':'さ','KeyC':'そ','KeyV':'ひ','KeyB':'こ','KeyN':'み','KeyM':'も','Comma':'ね','Period':'る','Slash':'め','IntlRo':'ろ'};
+        const SHIFT_JIS_KANA_MAP = {'Digit3':'ぁ','Digit4':'ぅ','Digit5':'ぇ','Digit6':'ぉ','Digit7':'ゃ','Digit8':'ゅ','Digit9':'ょ','Digit0':'を','KeyZ':'っ'};
+        const DAKUTEN_MAP = {'が':'か゛','ぎ':'き゛','ぐ':'く゛','げ':'け゛','ご':'こ゛','ざ':'さ゛','じ':'し゛','ず':'す゛','ぜ':'せ゛','ぞ':'そ゛','だ':'た゛','ぢ':'ち゛','づ':'つ゛','で':'て゛','ど':'と゛','ば':'は゛','び':'ひ゛','ぶ':'ふ゛','べ':'へ゛','ぼ':'ほ゛','ぱ':'は゜','ぴ':'ひ゜','ぷ':'ふ゜','ぺ':'へ゜','ぽ':'ほ゜','ゔ':'う゛'};
+
+        const normalizeKana = (word) => { return word.split('').map(c => DAKUTEN_MAP[c] || c).join(''); };
+
+        // ==========================================
+        // ★ 2. window API 登録 (安全確保)
+        // ==========================================
+        window.initAuth = async () => {
+            try {
+                if (typeof __firebase_config !== 'undefined') {
+                    const firebaseConfig = JSON.parse(__firebase_config);
+                    app = initializeApp(firebaseConfig);
+                    auth = getAuth(app);
+                    db = getFirestore(app);
+                    isFirebaseActive = true;
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else {
+                        await signInAnonymously(auth);
+                    }
+                    user = auth.currentUser;
+                }
+            } catch (e) {
+                console.warn("Firebase init failed:", e);
+            }
+        };
+
+        window.savePlayerData = () => { const data = { playerName, globalExp, globalLevel, coins, affection, inventory, unlockedClothes, furnitureInventory, appearance, aiAppearance, aiName, aiGender, aiReplyLength, roomData }; localStorage.setItem('survivor_data_' + playerName, JSON.stringify(data)); };
+        window.renderFurnitures = () => { if(!furnituresGroup) return; furnituresGroup.clear(); roomData.furnitures.forEach(f => { const def = FURNITURE_DB[f.key]; if(!def) return; const m = new THREE.Mesh(new THREE.BoxGeometry(1.5,1,1.5), new THREE.MeshStandardMaterial({color:def.color})); m.position.set(f.x, -1, f.z); m.userData = { id: f.id }; furnituresGroup.add(m); }); };
+        
+        window.updateInventoryUI = () => { 
+            const sel = document.getElementById('inventory-select'); if(!sel) return; sel.innerHTML = ''; let h = false; for(let k in FOOD_DB) if(inventory[k]>0){ sel.innerHTML += `<option value="${k}">${FOOD_DB[k].name}(${inventory[k]})</option>`; h=true; } if(!h) sel.innerHTML = '<option value="">なし</option>'; 
+            const cSel = document.getElementById('clothes-select'); if(cSel){ cSel.innerHTML = ''; unlockedClothes.forEach(k => { cSel.innerHTML += `<option value="${k}">${CLOTHES_DB[k].name}</option>`; }); }
+        };
+        window.updateFurnitureSelect = () => { const sel = document.getElementById('furniture-select'); if(!sel) return; sel.innerHTML = ''; let h = false; for(let k in FURNITURE_DB) if(furnitureInventory[k]>0){ sel.innerHTML += `<option value="${k}">${FURNITURE_DB[k].name}(${furnitureInventory[k]})</option>`; h=true; } if(!h) sel.innerHTML = '<option value="">なし</option>'; };
+        window.updateGarageUI = () => { const nameEl = document.getElementById('current-player-name'); if(nameEl) nameEl.innerText = playerName; globalLevel = 1; while (globalExp >= Math.pow(globalLevel, 2) * 1000) globalLevel++; const lvlEl = document.getElementById('global-level-display'); if(lvlEl) lvlEl.innerText = globalLevel; const coinsEl = document.getElementById('coin-display'); if(coinsEl) coinsEl.innerText = coins; const skinEl = document.getElementById('skin-name-display'); if(skinEl) skinEl.innerText = "衣装: " + (CLOTHES_DB[appearance.clothes]?.name || "標準"); const expFill = document.getElementById('global-exp-fill'); if(expFill) { const prev = Math.pow(globalLevel-1,2)*1000; const next = Math.pow(globalLevel,2)*1000; expFill.style.width = Math.min(100, ((globalExp - prev)/(next - prev))*100) + '%'; } const afEl = document.getElementById('affection-display'); if(afEl) afEl.innerText = affection; window.savePlayerData(); window.updateInventoryUI(); window.updateFurnitureSelect(); };
+        
+        window.loadPlayerData = () => { 
+            playerName = localStorage.getItem('survivor_current_user') || "名無しの部員"; 
+            const key = 'survivor_data_' + playerName; const d = localStorage.getItem(key); 
+            if(d){ 
+                const p = JSON.parse(d); globalExp=p.globalExp||0; coins=p.coins||0; affection=p.affection||0; 
+                inventory=p.inventory||{kusa:0,kurobuta:0}; unlockedClothes=p.unlockedClothes||['default']; furnitureInventory=p.furnitureInventory||furnitureInventory; 
+                appearance=p.appearance||appearance; aiAppearance=p.aiAppearance||{ skinColor: '#ffccaa', hairType: 'shortbob', hairColor: '#883333', faceType: 'smile', clothes: 'default' }; 
+                aiName=p.aiName||"相棒"; aiGender=p.aiGender||"female"; aiReplyLength=p.aiReplyLength||"short"; roomData=p.roomData||{wallColor:'#111111',floorColor:'#333333',furnitures:[]}; 
+            } 
+            window.updateGarageUI(); 
+        };
+        
+        window.toggleModal = (id, show) => { const el = document.getElementById(id); if(el) el.classList.toggle('hidden', !show); };
+        window.switchPlayer = () => { const n = prompt("部員名を入力（新規なら新データ）:"); if(n && n.trim() !== "") { playerName = n.trim(); localStorage.setItem('survivor_current_user', playerName); window.loadPlayerData(); } };
+        window.setTypingMode = (mode) => { typingMode = mode; ['romaji', 'kana', 'flick'].forEach(m => { const b = document.getElementById(`btn-${m}`); if(b){ b.classList.toggle('mode-active', m === mode); b.style.opacity = (m === mode) ? '1' : '0.5'; } }); if(mode==='kana' || mode==='flick') { currentWordList = baseKanaList.map(normalizeKana); currentKanaList = [...baseKanaList]; } else { currentWordList = [...baseRomajiList]; currentKanaList = [...baseKanaList]; } };
+        window.setTimeLimit = (s) => { targetTime = s; [10, 30, 60].forEach(t => { const b = document.getElementById(`time-${t}`); if(b){ b.classList.toggle('mode-active', t === s); b.style.opacity = (t === s) ? '1' : '0.5'; } }); };
+        window.setDifficulty = (d) => { currentDifficulty = d; ['slow', 'fast', 'super', 'brutal'].forEach(df => { const b = document.getElementById(`diff-${df}`); if(b){ b.classList.toggle('mode-active', df === d); b.style.opacity = (df === d) ? '1' : '0.5'; } }); };
+        
+        // ★ 離脱の強制停止ロジックとサウンド停止
+        window.quitGame = () => { 
+            window.stopBGM();
+            gameState = 'MENU'; is3DActive = false; 
+            cancelAnimationFrame(animationId); 
+            enemies.forEach(e => e.el.remove()); enemies = []; 
+            ['game-hud', 'game-container', 'room-3d-screen', 'game-over'].forEach(id => {
+                const el = document.getElementById(id);
+                if(el) el.classList.add('hidden');
+            }); 
+            document.getElementById('menu-screen').classList.remove('hidden'); 
+            
+            const fBox = document.getElementById('flick-input-box');
+            if (fBox) { fBox.classList.add('hidden'); fBox.blur(); }
+
+            if(onlineIslandUnsubscribe) { onlineIslandUnsubscribe(); onlineIslandUnsubscribe = null; } 
+            
+            // オンライン対戦中なら降伏扱い
+            if (currentMode === 'ONLINE' && isFirebaseActive && currentRoomId) {
+                try {
+                    const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'lobbies', currentRoomId);
+                    updateDoc(roomRef, { status: 'quit' }); 
+                } catch(e){}
+                currentRoomId = null;
+                const ps = document.getElementById('p2p-status'); if(ps) ps.classList.add('hidden');
+            }
+            window.updateGarageUI();
+        };
+        window.close3DRoom = () => { window.quitGame(); };
+        window.returnToMenu = () => { window.quitGame(); };
+        
+        window.openShop = () => { window.toggleModal('shop-modal', true); window.renderShop(); };
+        window.renderShop = () => { const sc = document.getElementById('shop-coin-display'); if(sc) sc.innerText = coins; const items = (db, id, cat) => { const l = document.getElementById(id); if(!l) return; l.innerHTML = ''; for(let k in db) { const bought = (cat==='clothes' && unlockedClothes.includes(k)); l.innerHTML += `<div class="bg-black p-1 mb-1 flex justify-between border-b border-zinc-800"><span class="text-xs">${db[k].name}</span><button onclick="window.buyItem('${cat}','${k}',${db[k].price})" class="${bought ? 'bg-zinc-600' : 'bg-green-700'} px-2 rounded text-[10px] active:scale-95">${bought ? '所有済' : db[k].price + 'C'}</button></div>`; } }; items(FOOD_DB, 'food-shop-list', 'food'); items(CLOTHES_DB, 'clothes-shop-list', 'clothes'); items(FURNITURE_DB, 'furniture-shop-list', 'furn'); };
+        window.buyItem = (cat, k, p) => { if(coins < p) { alert("コイン不足！"); return; } coins -= p; if(cat==='food') inventory[k]++; else if(cat==='clothes') unlockedClothes.push(k); else furnitureInventory[k]++; window.renderShop(); window.updateGarageUI(); };
+
+        // ==========================================
+        // ★ 3. 3D描画 ＆ 15種類の髪型実装
+        // ==========================================
+        window.createHumanoidMesh = (appData) => {
+            const group = new THREE.Group();
+            const skinMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(appData.skinColor), roughness: 0.8 });
+            const hairMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(appData.hairColor), roughness: 0.9 });
+            const clothesColor = CLOTHES_DB[appData.clothes]?.color || '#ffffff';
+            const clothesMat = new THREE.MeshStandardMaterial({ color: new THREE.Color(clothesColor) });
+            
+            const canvas = document.createElement('canvas'); canvas.width = 256; canvas.height = 256; const ctx = canvas.getContext('2d');
+            ctx.fillStyle = appData.skinColor; ctx.fillRect(0,0,256,256);
+            ctx.lineWidth = 6; ctx.lineCap = 'round'; ctx.strokeStyle = '#333'; ctx.fillStyle = '#111';
+            
+            if (appData.faceType === 'smile') {
+                ctx.beginPath(); ctx.arc(85, 115, 15, Math.PI, Math.PI*2); ctx.stroke();
+                ctx.beginPath(); ctx.arc(171, 115, 15, Math.PI, Math.PI*2); ctx.stroke();
+                ctx.fillStyle='rgba(255,100,100,0.4)'; ctx.beginPath(); ctx.arc(65,145,15,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(191,145,15,0,Math.PI*2); ctx.fill();
+                ctx.fillStyle = '#ff6666'; ctx.beginPath(); ctx.arc(128, 150, 25, 0, Math.PI); ctx.fill(); ctx.stroke();
+            } else if (appData.faceType === 'cool') {
+                ctx.beginPath(); ctx.moveTo(65, 115); ctx.lineTo(105, 100); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(151, 100); ctx.lineTo(191, 115); ctx.stroke();
+                ctx.beginPath(); ctx.arc(85,110,8,0,Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(171,110,8,0,Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.moveTo(110, 160); ctx.lineTo(146, 160); ctx.stroke();
+            } else if (appData.faceType === 'heart') {
+                ctx.fillStyle = '#ffea00'; ctx.font = "40px Arial"; ctx.fillText("⭐", 65, 125); ctx.fillText("⭐", 151, 125);
+                ctx.fillStyle='rgba(255,100,100,0.5)'; ctx.beginPath(); ctx.arc(65,145,15,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(191,145,15,0,Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(128, 155, 15, 0.2, Math.PI-0.2); ctx.stroke();
+            } else if (appData.faceType === 'sleepy') {
+                ctx.beginPath(); ctx.moveTo(70, 115); ctx.lineTo(100, 115); ctx.stroke();
+                ctx.beginPath(); ctx.moveTo(156, 115); ctx.lineTo(186, 115); ctx.stroke();
+                ctx.beginPath(); ctx.arc(128, 165, 8, 0, Math.PI*2); ctx.stroke();
+                ctx.fillStyle = '#88ccff'; ctx.beginPath(); ctx.arc(140, 175, 5, 0, Math.PI*2); ctx.fill();
+            } else {
+                ctx.beginPath(); ctx.arc(85,115,14,0,Math.PI*2); ctx.fill(); 
+                ctx.beginPath(); ctx.arc(171,115,14,0,Math.PI*2); ctx.fill();
+                ctx.fillStyle='#fff'; ctx.beginPath(); ctx.arc(81,111,4,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(167,111,4,0,Math.PI*2); ctx.fill();
+                ctx.fillStyle='rgba(255,100,100,0.2)'; ctx.beginPath(); ctx.arc(65,145,12,0,Math.PI*2); ctx.fill(); ctx.beginPath(); ctx.arc(191,145,12,0,Math.PI*2); ctx.fill();
+                ctx.beginPath(); ctx.arc(128, 155, 15, 0.4, Math.PI-0.4); ctx.stroke();
+            }
+
+            const faceMat = new THREE.MeshStandardMaterial({ map: new THREE.CanvasTexture(canvas), roughness: 0.8 });
+            const head = new THREE.Mesh(new THREE.BoxGeometry(1.2, 1.2, 1.0), [skinMat, skinMat, skinMat, skinMat, faceMat, skinMat]); head.position.y = 3.4; head.name = "head"; group.add(head);
+            const body = new THREE.Mesh(new THREE.BoxGeometry(1.1, 1.8, 0.7), clothesMat); body.position.y = 1.9; group.add(body);
+            
+            if (appData.clothes === 'school_girl') {
+                const skirt = new THREE.Mesh(new THREE.CylinderGeometry(0.55, 0.8, 0.6, 8), clothesMat);
+                skirt.position.y = 1.0; group.add(skirt);
+                const collar = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.1, 0.8), new THREE.MeshStandardMaterial({color: 0xffffff}));
+                collar.position.set(0, 2.7, 0); group.add(collar);
+            } else if (appData.clothes === 'suit') {
+                const tie = new THREE.Mesh(new THREE.BoxGeometry(0.15, 0.8, 0.1), new THREE.MeshStandardMaterial({color: 0xaa0000}));
+                tie.position.set(0, 2.2, 0.36); group.add(tie);
+            } else if (appData.clothes === 'ninja') {
+                const scarf = new THREE.Mesh(new THREE.TorusGeometry(0.4, 0.15, 8, 16), new THREE.MeshStandardMaterial({color: 0xaa0000}));
+                scarf.position.set(0, 2.7, 0); scarf.rotation.x = Math.PI/2; group.add(scarf);
+                const katana = new THREE.Mesh(new THREE.BoxGeometry(0.1, 1.6, 0.1), new THREE.MeshStandardMaterial({color: 0x333333}));
+                katana.position.set(0, 2.0, -0.4); katana.rotation.z = Math.PI/4; group.add(katana);
+            } else if (appData.clothes === 'maid') {
+                const apron = new THREE.Mesh(new THREE.BoxGeometry(0.9, 1.2, 0.1), new THREE.MeshStandardMaterial({color: 0xffffff}));
+                apron.position.set(0, 1.8, 0.36); group.add(apron);
+                const headdress = new THREE.Mesh(new THREE.CylinderGeometry(0.6, 0.6, 0.2, 16, 1, false, 0, Math.PI), new THREE.MeshStandardMaterial({color: 0xffffff}));
+                headdress.position.set(0, 4.05, 0); headdress.rotation.x = Math.PI/2; group.add(headdress);
+            } else if (appData.clothes === 'dress') {
+                const dressSkirt = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 1.2, 1.2, 16), clothesMat);
+                dressSkirt.position.y = 0.8; group.add(dressSkirt);
+            } else if (appData.clothes === 'god') {
+                const halo = new THREE.Mesh(new THREE.TorusGeometry(1.2, 0.1, 8, 32), new THREE.MeshStandardMaterial({color: 0xffdd00, emissive: 0xffdd00, emissiveIntensity: 0.5}));
+                halo.position.set(0, 3.4, -0.6); group.add(halo);
+                const cape = new THREE.Mesh(new THREE.BoxGeometry(1.0, 2.0, 0.1), new THREE.MeshStandardMaterial({color: 0xffffff}));
+                cape.position.set(0, 1.8, -0.4); cape.rotation.x = -0.2; group.add(cape);
+            }
+            
+            const ht = appData.hairType;
+            if(ht==='mash'){ const h1=new THREE.Mesh(new THREE.BoxGeometry(1.4,0.5,1.4), hairMat); h1.position.y=4.05; group.add(h1); const front=new THREE.Mesh(new THREE.BoxGeometry(1.45,0.3,0.3), hairMat); front.position.set(0,3.3,0.6); group.add(front); }
+            else if(ht==='shortbob'){ const h1=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h1.position.y=4.0; group.add(h1); const hb=new THREE.Mesh(new THREE.BoxGeometry(1.3,1.0,0.5), hairMat); hb.position.set(0,3.5,-0.45); group.add(hb); for(let i of [-1,1]){ const s=new THREE.Mesh(new THREE.BoxGeometry(0.3,1.2,0.6), hairMat); s.position.set(i*0.5,3.3,0.1); group.add(s); } }
+            else if(ht==='short'){ const h1=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.3,1.3), hairMat); h1.position.y=4.0; group.add(h1); const hb=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.5,0.5), hairMat); hb.position.set(0,3.7,-0.45); group.add(hb); for(let i of [-1,1]){ const s=new THREE.Mesh(new THREE.BoxGeometry(0.2,0.6,0.5), hairMat); s.position.set(i*0.55,3.7,0.1); group.add(s); } }
+            else if(ht==='long'){ const h1=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h1.position.y=4.0; group.add(h1); const back=new THREE.Mesh(new THREE.BoxGeometry(1.4, 2.5, 0.4), hairMat); back.position.set(0, 2.5, -0.6); group.add(back); for(let i of [-1,1]){ const s=new THREE.Mesh(new THREE.BoxGeometry(0.3,1.5,0.4), hairMat); s.position.set(i*0.6, 3.0, 0.2); group.add(s); } }
+            else if(ht==='ponytail'){ const h=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h.position.y=4.0; group.add(h); const t=new THREE.Mesh(new THREE.ConeGeometry(0.35,1.8,8), hairMat); t.position.set(0,4.2,-0.7); t.rotation.x=-Math.PI/4; group.add(t); }
+            else if(ht==='twintail'){ const h=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h.position.y=4.0; group.add(h); for(let i of [-1,1]){ const d=new THREE.Mesh(new THREE.ConeGeometry(0.35,1.8,8), hairMat); d.position.set(i*0.8,3.2,-0.2); d.rotation.z=i*0.2; group.add(d); } }
+            else if(ht==='hime'){ const h=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h.position.y=4.0; group.add(h); const back=new THREE.Mesh(new THREE.BoxGeometry(1.3, 2.5, 0.4), hairMat); back.position.set(0, 2.5, -0.6); group.add(back); for(let i of [-1,1]){ const s=new THREE.Mesh(new THREE.BoxGeometry(0.25,1.3,0.4), hairMat); s.position.set(i*0.55,3.3,0.2); group.add(s); } }
+            else if(ht==='drills'){ const h=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h.position.y=4.0; group.add(h); for(let i of [-1,1]){ for(let j=0; j<4; j++) { const d=new THREE.Mesh(new THREE.TorusGeometry(0.2, 0.1, 8, 16), hairMat); d.position.set(i*0.8, 3.8 - j*0.3, -0.1); d.rotation.x=Math.PI/2; group.add(d); } } }
+            else if(ht==='messy'){ const h=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h.position.y=4.0; group.add(h); for(let i=0; i<8; i++){ const m=new THREE.Mesh(new THREE.BoxGeometry(0.5,0.5,0.5), hairMat); m.position.set((Math.random()-0.5)*1.5, 4.0+(Math.random()-0.5)*0.5, (Math.random()-0.5)*1.2); m.rotation.set(Math.random(), Math.random(), Math.random()); group.add(m); } }
+            else if(ht==='side_tail'){ const h=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h.position.y=4.0; group.add(h); const t=new THREE.Mesh(new THREE.ConeGeometry(0.3, 2.0, 8), hairMat); t.position.set(0.7, 3.5, -0.5); t.rotation.z = -0.5; t.rotation.x = -0.2; group.add(t); }
+            else { const h=new THREE.Mesh(new THREE.BoxGeometry(1.3,0.4,1.3), hairMat); h.position.y=4.0; group.add(h); }
+            
+            const lArm=new THREE.Mesh(new THREE.BoxGeometry(0.3,1.6,0.3), clothesMat); lArm.position.set(-0.7,1.9,0); group.add(lArm);
+            const rArm=new THREE.Mesh(new THREE.BoxGeometry(0.3,1.6,0.3), clothesMat); rArm.position.set(0.7,1.9,0); group.add(rArm);
+            let legColor = 0x222222;
+            if (appData.clothes === 'school_girl' || appData.clothes === 'maid') legColor = appData.skinColor;
+            else if (appData.clothes === 'dress' || appData.clothes === 'god') legColor = clothesColor;
+            const legMat = new THREE.MeshStandardMaterial({color: legColor});
+            const lLeg=new THREE.Mesh(new THREE.BoxGeometry(0.4,1.5,0.4), legMat); lLeg.position.set(-0.3,0.4,0); group.add(lLeg);
+            const rLeg=new THREE.Mesh(new THREE.BoxGeometry(0.4,1.5,0.4), legMat); rLeg.position.set(0.3,0.4,0); group.add(rLeg);
+            group.position.y = -1.5; return group;
+        };
+
+        window.updatePreviewModel = () => { if (!previewScene) return; if (previewGroup) previewScene.remove(previewGroup); const appData = { skinColor: document.getElementById('make-skin-color')?.value || appearance.skinColor, hairType: document.getElementById('make-hair-type')?.value || appearance.hairType, faceType: document.getElementById('make-face-type')?.value || appearance.faceType, clothes: document.getElementById('make-clothes-type')?.value || appearance.clothes, hairColor: document.getElementById('make-hair-color')?.value || appearance.hairColor }; previewGroup = window.createHumanoidMesh(appData); previewGroup.position.y = -1.2; previewScene.add(previewGroup); };
+        window.renderPreview = () => { const container = document.getElementById('preview-canvas-container'); if (!container || previewRenderer) { if(previewRenderer) window.updatePreviewModel(); return; } previewScene = new THREE.Scene(); previewScene.background = new THREE.Color(0x87CEEB); previewCamera = new THREE.PerspectiveCamera(50, container.clientWidth/container.clientHeight, 0.1, 100); previewCamera.position.set(0,1.5,4.5); previewRenderer = new THREE.WebGLRenderer({ antialias: true }); previewRenderer.setSize(container.clientWidth, container.clientHeight); container.appendChild(previewRenderer.domElement); previewScene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dl = new THREE.DirectionalLight(0xffffff, 0.5); dl.position.set(2,5,2); previewScene.add(dl); function anim() { if(document.getElementById('charamake-modal').classList.contains('hidden')) return; requestAnimationFrame(anim); if(previewGroup) previewGroup.rotation.y += 0.01; previewRenderer.render(previewScene, previewCamera); } anim(); window.updatePreviewModel(); };
+        
+        window.openCharaMake = () => { 
+            const cSel = document.getElementById('make-clothes-type'); 
+            if(cSel){ cSel.innerHTML = ""; unlockedClothes.forEach(k => { cSel.innerHTML += `<option value="${k}" ${appearance.clothes===k ? 'selected' : ''}>${CLOTHES_DB[k].name}</option>`; }); } 
+            if(document.getElementById('make-ai-name')){
+                document.getElementById('make-skin-color').value = appearance.skinColor; 
+                document.getElementById('make-hair-type').value = appearance.hairType; 
+                document.getElementById('make-hair-color').value = appearance.hairColor; 
+                document.getElementById('make-face-type').value = appearance.faceType; 
+                document.getElementById('make-master-name').value = playerName; 
+                document.getElementById('make-ai-name').value = aiName; 
+                document.getElementById('make-ai-gender').value = aiGender; 
+                document.getElementById('make-ai-length').value = aiReplyLength;
+            }
+            window.toggleModal('charamake-modal', true); setTimeout(window.renderPreview, 100); 
+        };
+        
+        window.closeCharaMake = () => { 
+            if(document.getElementById('make-master-name')) playerName = document.getElementById('make-master-name').value.trim() || "名無しの部員"; 
+            if(document.getElementById('make-ai-name')) aiName = document.getElementById('make-ai-name').value.trim() || "相棒"; 
+            if(document.getElementById('make-ai-gender')) aiGender = document.getElementById('make-ai-gender').value; 
+            if(document.getElementById('make-ai-length')) aiReplyLength = document.getElementById('make-ai-length').value; 
+            if(document.getElementById('make-skin-color')) appearance.skinColor = document.getElementById('make-skin-color').value; 
+            if(document.getElementById('make-hair-type')) appearance.hairType = document.getElementById('make-hair-type').value; 
+            if(document.getElementById('make-hair-color')) appearance.hairColor = document.getElementById('make-hair-color').value; 
+            if(document.getElementById('make-face-type')) appearance.faceType = document.getElementById('make-face-type').value; 
+            if(document.getElementById('make-clothes-type')) appearance.clothes = document.getElementById('make-clothes-type').value; 
+            window.toggleModal('charamake-modal', false); 
+            window.updateGarageUI(); 
+        };
+
+        // --- 🏝️ 島開発 (建物・木) & スムーズTPSカメラ ---
+        const raycaster = new THREE.Raycaster(); const mouse = new THREE.Vector2();
+        
+        function updateSpeechBubblePosition(obj, text) { 
+            const bubble = document.getElementById('speech-bubble'); 
+            if (!is3DActive || !obj || !bubble || bubble.style.opacity === '0') return; 
+            const headV = new THREE.Vector3(); obj.getWorldPosition(headV); headV.y += 3.5; headV.project(camera); 
+            const x = (headV.x * 0.5 + 0.5) * window.innerWidth; const y = (headV.y * -0.5 + 0.5) * window.innerHeight; 
+            bubble.style.left = x + 'px'; bubble.style.top = y + 'px'; 
+            if(text) bubble.innerText = text;
+        }
+
+        const createHouse = (x, z, c, type, label) => {
+            const g = new THREE.Group();
+            const body = new THREE.Mesh(new THREE.BoxGeometry(4, 3, 4), new THREE.MeshStandardMaterial({color: c}));
+            body.position.y = 0; g.add(body);
+            const roof = new THREE.Mesh(new THREE.ConeGeometry(3.5, 2, 4), new THREE.MeshStandardMaterial({color: 0x883333}));
+            roof.position.y = 2.5; roof.rotation.y = Math.PI / 4; g.add(roof);
+            g.position.set(x, 0, z);
+            const hit = new THREE.Mesh(new THREE.BoxGeometry(4.5, 5, 4.5), new THREE.MeshBasicMaterial({visible:false}));
+            hit.position.y = 1; hit.userData = {type: type}; g.add(hit);
+            return g;
+        };
+
+        const createTree = (x, z) => {
+            const g = new THREE.Group();
+            const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 2), new THREE.MeshStandardMaterial({color: 0x8B4513}));
+            trunk.position.y = -0.5; g.add(trunk);
+            const leaves = new THREE.Mesh(new THREE.ConeGeometry(2, 4, 8), new THREE.MeshStandardMaterial({color: 0x228B22}));
+            leaves.position.y = 2; g.add(leaves);
+            g.position.set(x, 0, z);
+            return g;
+        };
+
+        window.open3DRoom = (mode) => { 
+            is3DActive = true; currentMode = mode;
+            window.toggleModal('menu-screen', false); window.toggleModal('room-3d-screen', true); 
+            const container = document.getElementById('canvas-container'); container.innerHTML = ""; 
+            scene = new THREE.Scene(); scene.background = new THREE.Color(mode==='openworld' ? 0x87CEEB : 0x111111); 
+            camera = new THREE.PerspectiveCamera(60, window.innerWidth/window.innerHeight, 0.1, 1000); 
+            renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true }); renderer.setSize(window.innerWidth, window.innerHeight); container.appendChild(renderer.domElement); 
+            scene.add(new THREE.AmbientLight(0xffffff, 0.8)); const dl = new THREE.DirectionalLight(0xffffff, 0.5); dl.position.set(5,10,5); scene.add(dl); 
+            
+            if(mode === 'openworld') {
+                const floor = new THREE.Mesh(new THREE.PlaneGeometry(200,200), new THREE.MeshStandardMaterial({color:0x4CAF50})); floor.rotation.x = -Math.PI/2; floor.position.y = -1.5; floor.name = "floor"; scene.add(floor); 
+                
+                scene.add(createHouse(10, 10, 0xffaa00, 'shop', '購買部'));
+                scene.add(createHouse(-10, 10, 0xff0044, 'dojo', '特訓道場'));
+                
+                const boardGroup = new THREE.Group();
+                const boardBody = new THREE.Mesh(new THREE.BoxGeometry(6, 4, 0.5), new THREE.MeshStandardMaterial({color: 0x222222}));
+                boardBody.position.set(0, 1, 15);
+                const hitBoard = new THREE.Mesh(new THREE.BoxGeometry(6,4,1), new THREE.MeshBasicMaterial({visible:false}));
+                hitBoard.position.set(0, 1, 15);
+                hitBoard.userData = {type: 'ranking'}; 
+                boardGroup.add(boardBody); boardGroup.add(hitBoard);
+                scene.add(boardGroup);
+
+                for(let i=0; i<30; i++){ scene.add(createTree(Math.random()*100 - 50, Math.random()*100 - 50)); }
+
+                myAvatarObj = window.createHumanoidMesh(appearance); scene.add(myAvatarObj);
+                myAiObj = window.createHumanoidMesh(aiAppearance); myAiObj.position.set(3, -1.5, -3); myAiObj.userData={type:'ai'}; scene.add(myAiObj);
+                
+                const guide = document.getElementById('island-guide'); if(guide) guide.classList.remove('hidden');
+            } else {
+                const floor = new THREE.Mesh(new THREE.PlaneGeometry(30,30), new THREE.MeshStandardMaterial({color:roomData.floorColor})); floor.rotation.x = -Math.PI/2; floor.position.y = -1.5; floor.name = "floor"; scene.add(floor); 
+                furnituresGroup = new THREE.Group(); scene.add(furnituresGroup); window.renderFurnitures(); 
+                myAiObj = window.createHumanoidMesh(aiAppearance); scene.add(myAiObj); 
+                camera.position.set(0, 3, 8);
+                const skinNameDisplay = document.getElementById('3d-skin-name-display');
+                if (skinNameDisplay) { skinNameDisplay.innerText = `${aiName} (親密度: ${affection})`; }
+            }
+
+            function loop() { 
+                if(!is3DActive) return; animationId = requestAnimationFrame(loop); 
+                
+                if(currentMode === 'openworld' && myAvatarObj) {
+                    const speed = 0.15; const rotSpeed = 0.05;
+                    if(keys.w) { myAvatarObj.position.z += Math.cos(myAvatarObj.rotation.y)*speed; myAvatarObj.position.x += Math.sin(myAvatarObj.rotation.y)*speed; }
+                    if(keys.s) { myAvatarObj.position.z -= Math.cos(myAvatarObj.rotation.y)*speed*0.6; myAvatarObj.position.x -= Math.sin(myAvatarObj.rotation.y)*speed*0.6; }
+                    if(keys.a) myAvatarObj.rotation.y += rotSpeed;
+                    if(keys.d) myAvatarObj.rotation.y -= rotSpeed;
+                    
+                    const targetCamPos = new THREE.Vector3(
+                        myAvatarObj.position.x - Math.sin(myAvatarObj.rotation.y) * 6,
+                        myAvatarObj.position.y + 4.5,
+                        myAvatarObj.position.z - Math.cos(myAvatarObj.rotation.y) * 6
+                    );
+                    camera.position.lerp(targetCamPos, 0.15);
+                    const lookTarget = new THREE.Vector3(myAvatarObj.position.x, myAvatarObj.position.y + 1.5, myAvatarObj.position.z);
+                    camera.lookAt(lookTarget);
+
+                    updateSpeechBubblePosition(myAvatarObj, null);
+                } else if(myAiObj) {
+                    const t = Date.now()*0.005; myAiObj.position.y = -1.5 + Math.sin(t)*0.03; 
+                    updateSpeechBubblePosition(myAiObj, null); 
+                }
+                renderer.render(scene, camera); 
+            } 
+            loop(); 
+        };
+        
+        window.toggleHousingMode = () => { isHousingMode = !isHousingMode; document.getElementById('housing-ui').classList.toggle('hidden', !isHousingMode); };
+        window.placeFurniture = () => { const k = document.getElementById('furniture-select').value; if(k && furnitureInventory[k]>0){ furnitureInventory[k]--; roomData.furnitures.push({id: Date.now(), key: k, x: (Math.random()-0.5)*10, z: (Math.random()-0.5)*10}); window.renderFurnitures(); window.updateGarageUI(); } };
+
+        // --- ★ 強固なAI JSONテーマ召喚 ---
+        window.generateAIWords = async () => {
+            const tInp = document.getElementById('theme-input');
+            const status = document.getElementById('gen-status');
+            if(!tInp || !status) return;
+            const t = tInp.value.trim();
+            if(!t) return;
+            
+            status.innerText = "召喚中...";
+            
+            const prompt = `テーマ「${t}」に関連する単語を10個生成してください。
+返答は必ず以下のJSON形式のみを出力してください。他のテキストやMarkdownブロックは絶対に含めないでください。
+{
+    "words": [
+        {"r": "romaji1", "k": "ひらがな1"},
+        {"r": "romaji2", "k": "ひらがな2"}
+    ]
+}`;
+            try {
+                // 空キーでもシステムが注入する前提で通信
+                const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, { 
+                    method:'POST', 
+                    body:JSON.stringify({
+                        contents:[{parts:[{text:prompt}]}], 
+                        generationConfig:{
+                            responseMimeType: "application/json",
+                            temperature: 0.5, 
+                            maxOutputTokens: 2000 
+                        }
+                    }) 
+                });
+                const d = await r.json(); 
+                if(d.error) throw new Error(d.error.message);
+                
+                let text = d.candidates[0].content.parts[0].text;
+                
+                // ★ 最強の正規表現抽出でゴミを確実に消す
+                const jsonMatch = text.match(/\{[\s\S]*\}/);
+                if (jsonMatch) {
+                    text = jsonMatch[0];
+                }
+
+                const res = JSON.parse(text);
+                if (!res.words || !Array.isArray(res.words)) throw new Error("JSON format error");
+
+                baseRomajiList = res.words.map(i => i.r.toLowerCase());
+                baseKanaList = res.words.map(i => i.k);
+                
+                if (typingMode === 'kana' || typingMode === 'flick') {
+                    currentWordList = baseKanaList.map(normalizeKana);
+                } else {
+                    currentWordList = baseRomajiList;
+                }
+                currentKanaList = baseKanaList;
+                
+                status.innerText = `✨ 「${t}」召喚成功！`;
+            } catch(e){ 
+                console.error(e); 
+                status.innerText = "召喚失敗...デフォルトで戦え！"; 
+                baseRomajiList = Object.keys(WORD_MAP);
+                baseKanaList = Object.values(WORD_MAP);
+                if (typingMode === 'kana' || typingMode === 'flick') currentWordList = baseKanaList.map(normalizeKana);
+                else currentWordList = baseRomajiList;
+            }
+        };
+
+        async function callGemini(p, mt = 300) { try { const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, { method:'POST', body:JSON.stringify({contents:[{parts:[{text:p}]}], generationConfig:{maxOutputTokens:mt}}) }); const d = await r.json(); return d.candidates?.[0]?.content?.parts?.[0]?.text || "..."; } catch(e) { return "通信エラー"; } }
+        
+        window.chatWithAI = async () => {
+            const inp = document.getElementById('chat-input'); if(!inp) return; const msg = inp.value.trim(); if(!msg) return; inp.value = "";
+            const bubble = document.getElementById('speech-bubble'); bubble.innerText = "考え中..."; bubble.style.opacity = '1';
+            
+            const currentLenEl = document.getElementById('make-ai-length');
+            const currentLen = currentLenEl ? currentLenEl.value : aiReplyLength;
+            let lenHint = "30字以内"; let mTokens = 300;
+            if(currentLen === "veryshort"){ lenHint = "一言（1〜10文字）"; mTokens = 150; }
+            if(currentLen === "long"){ lenHint = "3〜4文程度の長文"; mTokens = 800; }
+            
+            const promptStr = `あなたは「${aiName}」性格「${aiGender}」のAI。プレイヤー「${playerName}」へ「${lenHint}」で返答して。必ず名前を呼ぶ。❤️禁止。メッセージ: ${msg}`;
+            
+            try {
+                const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, { 
+                    method:'POST', 
+                    body:JSON.stringify({contents:[{parts:[{text:promptStr}]}], generationConfig:{maxOutputTokens:mTokens}}) 
+                }); 
+                const d = await r.json(); 
+                if(d.error) throw new Error(d.error.message);
+                const reply = d.candidates?.[0]?.content?.parts?.[0]?.text || "...";
+                bubble.innerText = reply; setTimeout(() => { if(bubble.innerText === reply) bubble.style.opacity = '0'; }, 7000);
+            } catch(e) { 
+                bubble.innerText = "通信エラー..."; setTimeout(() => { bubble.style.opacity = '0'; }, 3000);
+            }
+        };
+
+        window.feedAI = () => { const val = document.getElementById('inventory-select').value; if(val && inventory[val]>0){ inventory[val]--; affection += FOOD_DB[val].aff; window.updateGarageUI(); const b = document.getElementById('speech-bubble'); b.innerText = FOOD_DB[val].msg + ` (信頼度+${FOOD_DB[val].aff})`; b.style.opacity = '1'; setTimeout(() => b.style.opacity = '0', 4000); } };
+        window.giveClothesToAI = () => { const val = document.getElementById('clothes-select').value; if(val && unlockedClothes.includes(val)){ aiAppearance.clothes = val; window.savePlayerData(); const b = document.getElementById('speech-bubble'); b.innerText = "ありがとう！似合う？"; b.style.opacity = '1'; setTimeout(() => b.style.opacity = '0', 4000); if(currentMode==='fureai') window.open3DRoom('fureai'); } };
+
+        // --- ★ 視認性最強！ タイピングロジック ---
+        window.handleInput = (char) => {
+            if (gameState !== 'PLAYING') return;
+
+            if (!activeEnemy) {
+                activeEnemy = enemies.find(e => e.word[0] === char);
+                if (activeEnemy) {
+                    typedIndex = 1;
+                    totalTyped++;
+                    window.playSound(523, 'sine', 0.05); 
+                    
+                    // ★ 1文字単語の即撃破処理
+                    if (typedIndex >= activeEnemy.word.length) {
+                        score += activeEnemy.word.length * 10;
+                        activeEnemy.el.remove();
+                        enemies = enemies.filter(e => e.id !== activeEnemy.id);
+                        activeEnemy = null;
+                        typedIndex = 0;
+                        window.playSound(880, 'square', 0.1); 
+                        if (score % 200 === 0) currentLevel++; 
+                    } else {
+                        window.updateUI();
+                    }
+                } else { 
+                    score = Math.max(0, score - 2); 
+                    window.playSound(150, 'sawtooth', 0.1); 
+                }
+            } else {
+                if (activeEnemy.word[typedIndex] === char) {
+                    typedIndex++;
+                    totalTyped++;
+                    window.playSound(523 + typedIndex * 20, 'sine', 0.05); 
+                    
+                    if (activeEnemy && typedIndex >= activeEnemy.word.length) {
+                        score += activeEnemy.word.length * 10;
+                        activeEnemy.el.remove();
+                        enemies = enemies.filter(e => e.id !== activeEnemy.id);
+                        activeEnemy = null;
+                        typedIndex = 0;
+                        window.playSound(880, 'square', 0.1); 
+                        if (score % 200 === 0) currentLevel++; 
+                    } else {
+                        window.updateUI();
+                    }
+                } else { 
+                    score = Math.max(0, score - 5); 
+                    window.playSound(150, 'sawtooth', 0.1); 
+                }
+            }
+            
+            const sDisp = document.getElementById('score-display');
+            if (sDisp) sDisp.innerText = score;
+            const lDisp = document.getElementById('level-display');
+            if (lDisp) lDisp.innerText = currentLevel;
+            
+            const tDisp = document.getElementById('time-display');
+            if(tDisp) {
+                const elap = (targetTime + 0.1 - parseFloat(tDisp.innerText)) / 60;
+                const wDisp = document.getElementById('wpm-display');
+                if(wDisp) wDisp.innerText = Math.floor((totalTyped / 5) / (elap || 0.01)) || 0;
+            }
+        };
+
+        window.updateUI = () => {
+            if (!activeEnemy) return;
+            const label = document.getElementById(`label-${activeEnemy.id}`);
+            if (!label) return;
+            const word = activeEnemy.word;
+            const hint = activeEnemy.kana;
+            
+            label.innerHTML = `
+                ${(typingMode==='romaji')?`<span class="kana-hint block text-xs text-zinc-300 mb-1">${hint}</span>`:''}
+                <span class="text-2xl font-bold tracking-widest drop-shadow-md"><span class="typed text-zinc-500 hidden"></span><span class="current text-pink-500">${word[typedIndex]||''}</span><span class="remaining text-white">${word.slice(typedIndex+1)}</span></span>
+            `; 
+        };
+
+        // ★ オンライン対戦（Firebase完全同期）
+        window.updateP2PStatus = (msg, isError = false) => {
+            const statusEl = document.getElementById('p2p-status');
+            if(statusEl) {
+                statusEl.classList.remove('hidden');
+                statusEl.innerText = msg;
+                statusEl.style.color = isError ? '#ff4444' : '#ffea00';
+            }
+        };
+
+        window.hostP2P = async () => { 
+            const codeInput = document.getElementById('room-code');
+            if(!codeInput) return;
+            const c = codeInput.value.trim(); 
+            if(!c) { window.updateP2PStatus("合言葉を入力してね！", true); return; }
+            if(!isFirebaseActive || !user) { window.updateP2PStatus("オンライン環境に接続できません。", true); return; }
+            
+            isHost = true;
+            currentRoomId = c;
+            window.updateP2PStatus("部屋を作成中...");
+            
+            try {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'lobbies', c);
+                await setDoc(roomRef, {
+                    status: 'waiting',
+                    hostId: user.uid,
+                    hostName: playerName,
+                    hostScore: 0,
+                    hostHp: 100,
+                    createdAt: Date.now()
+                });
+                
+                window.updateP2PStatus(`部屋【${c}】を作成！相手の参加を待っています...`);
+                
+                onlineUnsubscribe = onSnapshot(roomRef, (snap) => {
+                    const data = snap.data();
+                    if (data && data.status === 'playing') {
+                        window.updateP2PStatus("✨ 相手が来ました！ゲーム開始！");
+                        if (onlineUnsubscribe) { onlineUnsubscribe(); onlineUnsubscribe = null; }
+                        setTimeout(() => window.startMode('ONLINE'), 1000);
+                    }
+                });
+            } catch(e) {
+                window.updateP2PStatus("エラー: 部屋が作れませんでした。(" + e.message + ")", true);
+            }
+        };
+
+        window.joinP2P = async () => { 
+            const codeInput = document.getElementById('room-code');
+            if(!codeInput) return;
+            const c = codeInput.value.trim(); 
+            if(!c) { window.updateP2PStatus("合言葉を入力してね！", true); return; }
+            if(!isFirebaseActive || !user) { window.updateP2PStatus("オンライン環境に接続できません。", true); return; }
+
+            isHost = false;
+            currentRoomId = c;
+            window.updateP2PStatus("接続しています...");
+            
+            try {
+                const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'lobbies', c);
+                await updateDoc(roomRef, {
+                    status: 'playing',
+                    guestId: user.uid,
+                    guestName: playerName,
+                    guestScore: 0,
+                    guestHp: 100
+                });
+                window.updateP2PStatus("✨ 相手と接続しました！ゲーム開始！");
+                setTimeout(() => window.startMode('ONLINE'), 1000);
+            } catch(e) {
+                window.updateP2PStatus("エラー: ホストが見つからないか既に対戦中です。", true);
+            }
+        };
+
+        window.syncOnline = () => {
+            if (!currentRoomId || !isFirebaseActive) return;
+            const roomRef = doc(db, 'artifacts', appId, 'public', 'data', 'lobbies', currentRoomId);
+            
+            const rnDisp = document.getElementById('rival-name-display');
+            if(rnDisp) rnDisp.innerText = "通信中...";
+
+            const syncTimer = setInterval(async () => {
+                if (gameState !== 'PLAYING') {
+                    clearInterval(syncTimer);
+                    return;
+                }
+                try {
+                    if (isHost) {
+                        await updateDoc(roomRef, { hostScore: score, hostHp: hp });
+                    } else {
+                        await updateDoc(roomRef, { guestScore: score, guestHp: hp });
+                    }
+                } catch(e){}
+            }, 500);
+
+            onlineUnsubscribe = onSnapshot(roomRef, (snap) => {
+                const data = snap.data();
+                if (!data) return;
+                
+                const oppScore = isHost ? data.guestScore : data.hostScore;
+                const oppHp = isHost ? data.guestHp : data.hostHp;
+                const oppName = isHost ? data.guestName : data.hostName;
+                const rStatus = data.status;
+
+                const rsDisp = document.getElementById('rival-score-display');
+                if (rsDisp) rsDisp.innerText = oppScore || 0;
+                
+                const rhpFill = document.getElementById('rival-hp-fill');
+                if (rhpFill) rhpFill.style.width = Math.max(0, oppHp || 0) + '%';
+                
+                const rnDisp2 = document.getElementById('rival-name-display');
+                if (rnDisp2 && oppName) rnDisp2.innerText = oppName;
+
+                if (rStatus === 'quit' && gameState === 'PLAYING') {
+                    window.finishGame("相手が逃亡しました。君の勝ちだ！");
+                    return;
+                }
+
+                if (oppHp !== undefined && oppHp <= 0 && gameState === 'PLAYING') {
+                    window.finishGame("相手のHPが尽きた。君の勝利！");
+                }
+            });
+        };
+
+        window.startMode = (mode) => {
+            // フリーズ対策：3Dを完全に閉じる
+            if (is3DActive) {
+                is3DActive = false;
+                cancelAnimationFrame(animationId);
+                const rScreen = document.getElementById('room-3d-screen');
+                if(rScreen) rScreen.classList.add('hidden');
+            }
+
+            currentMode = mode; gameState = 'PLAYING'; 
+            window.toggleModal('menu-screen', false); 
+            window.toggleModal('game-hud', true); 
+            window.toggleModal('game-container', true);
+            score = 0; hp = 100; totalTyped = 0; typedIndex = 0; currentLevel = 1;
+            enemies.forEach(e => e.el.remove()); enemies = []; activeEnemy = null;
+            document.getElementById('hp-fill').style.width = '100%'; document.getElementById('score-display').innerText = 0;
+            
+            window.initAudio();
+            window.startBGM();
+            window.playSound(880, 'sine', 0.5, 0.1);
+
+            const uiInp = document.getElementById('universal-input'); if(uiInp) { uiInp.value=''; uiInp.focus(); }
+            const fBox = document.getElementById('flick-input-box');
+            if(fBox && ('ontouchstart' in window)) { fBox.classList.remove('hidden'); fBox.focus(); }
+            else { document.getElementById('game-body').focus(); }
+
+            if (mode === 'ONLINE') {
+                const rHud = document.getElementById('rival-hud');
+                if (rHud) rHud.classList.remove('hidden');
+                window.syncOnline();
+            } else {
+                const rHud = document.getElementById('rival-hud');
+                if (rHud) rHud.classList.add('hidden');
+            }
+
+            const start = Date.now();
+            function loop(){
+                if(gameState !== 'PLAYING') return; 
+                animationId = requestAnimationFrame(loop); 
+                const timeLeft = Math.max(0, targetTime - (Date.now()-start)/1000); 
+                const tDisp = document.getElementById('time-display');
+                if(tDisp) tDisp.innerText = timeLeft.toFixed(1); 
+                if(timeLeft <= 0) { window.finishGame("タイムアップ！"); return; }
+                
+                const sets = DIFF_SETTINGS[currentDifficulty] || DIFF_SETTINGS['super']; 
+                if(Date.now()-lastSpawn > sets.spawnBase){ 
+                    const listIdx = Math.floor(Math.random()*currentWordList.length);
+                    const w = currentWordList[listIdx]; 
+                    const h = currentKanaList[listIdx] || "";
+                    const id = Math.random().toString(36).substr(2,9); 
+                    const ang = Math.random()*Math.PI*2; 
+                    const dist=Math.max(window.innerWidth, window.innerHeight)*0.6; 
+                    
+                    const x = window.innerWidth/2 + Math.cos(ang)*dist;
+                    const y = window.innerHeight/2 + Math.sin(ang)*dist;
+                    
+                    const el = document.createElement('div'); 
+                    el.className = 'enemy absolute pointer-events-none flex flex-col items-center justify-center'; 
+                    el.style.left = x + 'px';
+                    el.style.top = y + 'px';
+                    
+                    const initialHtml = `
+                        ${(typingMode==='romaji')?`<span class="kana-hint block text-xs text-zinc-300 mb-1">${h}</span>`:''}
+                        <span class="text-2xl font-bold tracking-widest drop-shadow-md"><span class="typed text-zinc-500 hidden"></span><span class="current text-pink-500">${w[0]||''}</span><span class="remaining text-white">${w.slice(1)}</span></span>
+                    `;
+                    
+                    el.innerHTML = `
+                        <div class="relative w-16 h-16 flex items-center justify-center">
+                            <svg viewBox="0 0 24 24" fill="none" stroke="#00ff41" stroke-width="2" class="w-full h-full absolute animate-[spin_4s_linear_infinite] opacity-50"><circle cx="12" cy="12" r="10"/><path d="M12 2v4m0 12v4M2 12h4m12 0h4"/></svg>
+                            <div class="absolute top-[-60px] left-1/2 transform -translate-x-1/2 whitespace-nowrap bg-black/90 px-4 py-2 rounded-lg border-2 border-green-500 shadow-[0_0_20px_rgba(0,255,65,0.8)] text-center z-50" id="label-${id}">${initialHtml}</div>
+                        </div>`; 
+                    
+                    document.getElementById('game-container').appendChild(el); 
+                    enemies.push({id, word:w, kana:h, x, y, el, speed: sets.baseSpeed + (currentLevel * 0.15)}); 
+                    lastSpawn = Date.now(); 
+                }
+                
+                const centerX = window.innerWidth / 2;
+                const centerY = window.innerHeight / 2;
+
+                for (let i = enemies.length - 1; i >= 0; i--) {
+                    const en = enemies[i];
+                    const dx = centerX - en.x;
+                    const dy = centerY - en.y;
+                    const dist = Math.sqrt(dx*dx + dy*dy);
+                    
+                    if (dist < 45) { 
+                        hp -= sets.dmg; 
+                        window.playSound(100, 'sawtooth', 0.3, 0.1); 
+                        const hf = document.getElementById('hp-fill');
+                        if(hf) hf.style.width = Math.max(0, hp) + '%'; 
+                        en.el.remove(); 
+                        enemies.splice(i, 1); 
+                        if(activeEnemy && activeEnemy.id === en.id) activeEnemy = null;
+                        if(hp <= 0) { window.finishGame("敗北...圧倒的虚無。"); return; }
+                    } else {
+                        en.x += (dx/dist) * en.speed;
+                        en.y += (dy/dist) * en.speed;
+                        en.el.style.left = en.x + 'px';
+                        en.el.style.top = en.y + 'px';
+                    }
+                }
+            } loop();
+        };
+
+        // ★ リザルトとランキングの保存
+        window.finishGame = async (msg) => { 
+            gameState = 'FINISHED'; 
+            window.stopBGM();
+            window.playSound(440, 'square', 1.0, 0.1); 
+            window.toggleModal('game-over', true); 
+            const fBox = document.getElementById('flick-input-box'); if(fBox) fBox.classList.add('hidden'); 
+            
+            const rewardExp = score * 10; 
+            const rewardCoins = Math.floor(score * 5);
+            globalExp += rewardExp; 
+            coins += rewardCoins; 
+            window.updateGarageUI(); 
+            
+            const expDisp = document.getElementById('final-exp-disp');
+            if(expDisp) expDisp.innerText = `+ ${rewardExp} EXP`;
+            const coinDisp = document.getElementById('final-coin-disp');
+            if(coinDisp) coinDisp.innerText = `💰 + ${rewardCoins} C`;
+
+            const rMsg = document.getElementById('result-message'); if(rMsg) rMsg.innerText = msg || `最終スコア: ${score}`;
+            
+            // ★ ハイスコアのみランキングに保存（バグ修正済）
+            if(user && isFirebaseActive) { 
+                try { 
+                    const lRef = doc(db, 'artifacts', appId, 'public', 'data', 'leaderboard', user.uid);
+                    const lSnap = await getDoc(lRef);
+                    if (!lSnap.exists() || lSnap.data().score < score) {
+                        await setDoc(lRef, { name: playerName, score: score, level: globalLevel, timestamp: Date.now(), mode: `${targetTime}s` });
+                    }
+                } catch(e){} 
+            }
+
+            if (currentMode === 'ONLINE' && isFirebaseActive && currentRoomId) {
+                try { await updateDoc(doc(db, 'artifacts', appId, 'public', 'data', 'lobbies', currentRoomId), { status: 'finished' }); } catch(e){}
+                if (onlineUnsubscribe) { onlineUnsubscribe(); onlineUnsubscribe = null; }
+                currentRoomId = null;
+                const ps = document.getElementById('p2p-status'); if(ps) ps.classList.add('hidden');
+            }
+
+            const rEl = document.getElementById('ai-roast');
+            if(rEl) rEl.innerText = "AIからの評価を受信中... ✨";
+            try {
+                const promptStr = `タイピングゲーム終了。スコア${score}。あなたは「${aiName}」という設定のAIです。プレイヤー「${playerName}」へ短く1行で評価して。❤️禁止。`;
+                const r = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`, { 
+                    method:'POST', 
+                    body:JSON.stringify({contents:[{parts:[{text:promptStr}]}], generationConfig:{maxOutputTokens:100}}) 
+                }); 
+                const d = await r.json(); 
+                if(d.error) throw new Error();
+                const roast = d.candidates?.[0]?.content?.parts?.[0]?.text || "お疲れ様！";
+                if (rEl) rEl.innerText = roast;
+            } catch(e) {
+                if (rEl) rEl.innerText = "お疲れ様！圧倒的成長！";
+            }
+        };
+
+        // --- 起動とキー入力制御 ---
+        function init() {
+            window.initAuth();
+            
+            // PC入力用の最強キーボードリスナー
+            const ROMAJI_MAP = {
+                'KeyA':'a', 'KeyB':'b', 'KeyC':'c', 'KeyD':'d', 'KeyE':'e', 'KeyF':'f', 'KeyG':'g', 'KeyH':'h', 'KeyI':'i', 'KeyJ':'j', 'KeyK':'k', 'KeyL':'l', 'KeyM':'m', 'KeyN':'n', 'KeyO':'o', 'KeyP':'p', 'KeyQ':'q', 'KeyR':'r', 'KeyS':'s', 'KeyT':'t', 'KeyU':'u', 'KeyV':'v', 'KeyW':'w', 'KeyX':'x', 'KeyY':'y', 'KeyZ':'z',
+                'Minus':'-', 'Digit0':'0', 'Digit1':'1', 'Digit2':'2', 'Digit3':'3', 'Digit4':'4', 'Digit5':'5', 'Digit6':'6', 'Digit7':'7', 'Digit8':'8', 'Digit9':'9'
+            };
+
+            document.addEventListener('click', (e) => { 
+                const tag = e.target.tagName.toLowerCase();
+                if (e.target.id === 'chat-input' || tag === 'input' || tag === 'select' || tag === 'button') return;
+                
+                if(gameState === 'PLAYING') {
+                    if (typingMode === 'flick') {
+                        document.getElementById('flick-input-box')?.focus();
+                    } else {
+                        document.getElementById('game-body')?.focus();
+                    }
+                }
+            });
+            
+            window.addEventListener('keydown', (e) => {
+                if(e.key === 'Escape') { if(gameState==='PLAYING' || is3DActive) window.quitGame(); }
+                if(e.key === 'Enter') {
+                    if(is3DActive) window.chatWithAI();
+                    else if(gameState==='MENU') window.startMode('SOLO');
+                }
+                
+                if(is3DActive && currentMode==='openworld') { 
+                    if(document.activeElement.id !== 'chat-input') {
+                        const k = e.key.toLowerCase(); if(['w','a','s','d'].includes(k)) keys[k] = true; 
+                    }
+                }
+
+                if (gameState !== 'PLAYING') return;
+                if (document.activeElement.tagName.toLowerCase() === 'input' && document.activeElement.id !== 'flick-input-box') return;
+
+                if (typingMode === 'flick') return;
+
+                e.preventDefault(); // ★ 二重発火を完全にブロック
+
+                let char = null;
+                if (typingMode === 'kana') {
+                    char = e.shiftKey ? SHIFT_JIS_KANA_MAP[e.code] : JIS_KANA_MAP[e.code];
+                    if (e.key === 'ー' || e.code === 'IntlYen') char = 'ー';
+                } else if (typingMode === 'romaji') {
+                    char = ROMAJI_MAP[e.code];
+                }
+
+                if (char) { 
+                    window.handleInput(char); 
+                }
+            });
+            
+            window.addEventListener('keyup', (e) => {
+                if(is3DActive && currentMode==='openworld') { const k = e.key.toLowerCase(); if(['w','a','s','d'].includes(k)) keys[k] = false; }
+            });
+
+            const fBox = document.getElementById('flick-input-box');
+            if(fBox) {
+                fBox.addEventListener('input', (e) => {
+                    if (gameState === 'PLAYING') {
+                        const v = e.target.value;
+                        if (v.length > 0) {
+                            const lastChar = v[v.length - 1];
+                            const converted = typingMode === 'kana' ? normalizeKana(lastChar) : lastChar.toLowerCase();
+                            window.handleInput(converted);
+                        }
+                        if (e.target.value.length > 5) e.target.value = "";
+                    }
+                });
+            }
+
+            const canvasContainer = document.getElementById('canvas-container'); 
+            if(canvasContainer){ 
+                canvasContainer.onclick = (e) => { 
+                    if(!is3DActive) return; 
+                    mouse.x = (e.clientX / window.innerWidth) * 2 - 1; mouse.y = -(e.clientY / window.innerHeight) * 2 + 1; 
+                    raycaster.setFromCamera(mouse, camera); 
+                    
+                    if (currentMode === 'openworld') {
+                        const hits = raycaster.intersectObjects(scene.children, true);
+                        for(let hit of hits) {
+                            if(hit.object.userData.type === 'shop') window.openShop();
+                            else if(hit.object.userData.type === 'dojo') {
+                                window.close3DRoom(); 
+                                window.startMode('SOLO');
+                            }
+                            else if(hit.object.userData.type === 'ranking') window.showRanking();
+                            else if(hit.object.userData.type === 'ai') document.getElementById('action-menu').classList.remove('hidden');
+                        }
+                    }
+                }; 
+            }
+        }
+        
+        init();
+    </script>
+</body>
+</html>
